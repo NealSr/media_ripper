@@ -1,74 +1,65 @@
-# makemkv/ripper.py
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import List
+from rich.spinner import Spinner
+from rich.live import Live
 
 from ..models.title import Title
+from ..models.movie import Movie
+from ..utils.utils import (
+    copy_to_clipboard,
+    format_size_mb,
+    wait_for_temp_file_to_stabilize,
+    prompt_with_optional_finder,
+)
 
 
-def rip_titles(titles: List[Title], movie, args, tui=None):
-    """
-    Rip selected titles using MakeMKV.
-    """
-
+def rip_titles(titles: List[Title], movie: Movie, args):
     output_root = Path(args.output_root)
     disc_spec = args.device if args.device != "auto" else "disc:0"
 
     for t in titles:
-        if t.action == "skip":
+        if t.action != "rip":
             continue
 
         out_dir = output_root / movie.safe_title
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        out_file = out_dir / f"{t.safe_movie_name}_{t.movie_year}_{t.bonus_display_name}_t{t.id:02d}.mkv"
+        out_file = out_dir / t.final_filename
 
-        if tui:
-            tui.log(f"Ripping title {t.id} → {out_file}")
-            tui.rip_task = None
-            tui.update_rip_progress(0)
+        print(f"\n=== RIP TITLE {t.id} ===")
+        print(f"Output file will be:\n  {out_file}\n")
 
-        cmd = [
-            "makemkvcon",
-            "-r",
-            "--progress=-stdout",
-            "mkv",
-            disc_spec,
-            str(t.id),
-            str(out_dir),
-        ]
+        cmd = f'makemkvcon mkv {disc_spec} {t.id} "{out_dir}"'
 
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
+        print("# Run this command to rip the title:")
+        print(cmd)
+        copy_to_clipboard(cmd)
+        print("(Command copied to clipboard)\n")
 
-        for raw in proc.stdout:
-            line = raw.strip()
+        print("Waiting for you to run the command…")
 
-            # Progress lines
-            if tui and line.startswith("PRGV:"):
-                try:
-                    _, rest = line.split(":", 1)
-                    cur, base, maxv = [int(x) for x in rest.split(",")]
-                    if maxv > base:
-                        percent = ((cur - base) / (maxv - base)) * 100
-                        tui.update_rip_progress(percent)
-                except Exception:
-                    pass
-                continue  # DO NOT LOG PRGV LINES
+        with Live(Spinner("dots", text="Ripping…"), refresh_per_second=10):
+            input("Press Enter when the rip has started… ")
 
-            # Log everything else
-            if tui:
-                tui.log(line)
+        # Wait for temp file to stabilize
+        wait_for_temp_file_to_stabilize(interval_seconds=2.0, checks=3)
 
-        proc.wait()
+        input("Press Enter when you believe the rip is complete… ")
 
-        if tui:
-            tui.update_rip_progress(100)
-            tui.log(f"[green]Rip complete for title {t.id}[/green]")
+        print("\nVerifying rip output…")
+
+        if not out_file.exists():
+            print("❌ ERROR: Output file does not exist.")
+            prompt_with_optional_finder(out_file)
+            continue
+
+        size_mb = format_size_mb(out_file)
+        if size_mb < 1:
+            print(f"❌ ERROR: Output file is too small ({size_mb:.2f} MB).")
+            prompt_with_optional_finder(out_file)
+            continue
+
+        print(f"✔ Rip verified ({size_mb:.2f} MB)")
+        prompt_with_optional_finder(out_file)

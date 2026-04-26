@@ -1,80 +1,72 @@
-# encode/handbrake.py
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import List
+from rich.spinner import Spinner
+from rich.live import Live
 
 from ..models.title import Title
+from ..models.movie import Movie
+from ..utils.utils import (
+    copy_to_clipboard,
+    format_size_mb,
+    prompt_with_optional_finder,
+)
 
 
-def encode_titles(titles: List[Title], movie, args, tui=None):
-    """
-    Encode ripped MKVs using HandBrakeCLI with real-time progress updates.
-    """
-
+def encode_titles(titles: List[Title], movie: Movie, args):
     output_root = Path(args.output_root)
     preset = args.preset or "Fast 1080p30"
 
     for t in titles:
-        if t.action == "skip":
+        if t.action != "rip":
             continue
 
-        # Input file (ripped MKV)
-        in_file = (
-            output_root
-            / movie.safe_title
-            / f"{t.safe_movie_name}_{t.movie_year}_{t.bonus_display_name}_t{t.id:02d}.mkv"
+        in_file = output_root / movie.safe_title / t.final_filename
+        out_file = output_root / movie.safe_title / t.final_filename
+
+        print(f"\n=== ENCODE TITLE {t.id} ===")
+        print(f"Input file:\n  {in_file}")
+        print(f"Output file:\n  {out_file}\n")
+
+        if not in_file.exists():
+            print("❌ ERROR: Input file does not exist. Did the rip succeed?")
+            prompt_with_optional_finder(in_file, "Press Enter to continue, or press O to reveal the expected input in Finder… ")
+            continue
+
+        in_size_mb = format_size_mb(in_file)
+        if in_size_mb < 1:
+            print(f"❌ ERROR: Input file is too small ({in_size_mb:.2f} MB).")
+            prompt_with_optional_finder(in_file, "Press Enter to continue, or press O to reveal the input in Finder… ")
+            continue
+
+        cmd = (
+            f'HandBrakeCLI -i "{in_file}" -o "{out_file}" '
+            f'--preset "{preset}" --format av_mkv'
         )
 
-        # Output encoded file
-        out_file = (
-            output_root
-            / movie.safe_title
-            / f"{t.final_filename}"
-        )
+        print("# Run this command to encode the title:")
+        print(cmd)
+        copy_to_clipboard(cmd)
+        print("(Command copied to clipboard)\n")
 
-        if tui:
-            tui.log(f"Encoding title {t.id} → {out_file}")
-            tui.encode_task = None
-            tui.update_encode_progress(0)
+        print("Waiting for you to run the command…")
 
-        cmd = [
-            "HandBrakeCLI",
-            "-i", str(in_file),
-            "-o", str(out_file),
-            "--preset", preset,
-            "--format", "av_mkv",
-        ]
+        with Live(Spinner("dots", text="Encoding…"), refresh_per_second=10):
+            input("Press Enter when encoding is complete… ")
 
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
+        print("\nVerifying encoded output…")
 
-        for raw in proc.stdout:
-            line = raw.strip()
+        if not out_file.exists():
+            print("❌ ERROR: Output file does not exist.")
+            prompt_with_optional_finder(out_file)
+            continue
 
-            # HandBrake progress lines look like:
-            # Encoding: task 1 of 1, 42.35 % (xxx fps, eta 00h00m)
-            if tui and "Encoding:" in line and "%" in line:
-                try:
-                    percent_str = line.split("%")[0].split()[-1]
-                    percent = float(percent_str)
-                    tui.update_encode_progress(percent)
-                except Exception:
-                    pass
-                continue  # DO NOT LOG PROGRESS LINES
+        size_mb = format_size_mb(out_file)
+        if size_mb < 1:
+            print(f"❌ ERROR: Output file is too small ({size_mb:.2f} MB).")
+            prompt_with_optional_finder(out_file)
+            continue
 
-            # Log everything else
-            if tui:
-                tui.log(line)
-
-        proc.wait()
-
-        if tui:
-            tui.update_encode_progress(100)
-            tui.log(f"[green]Encode complete for title {t.id}[/green]")
+        print(f"✔ Encode verified ({size_mb:.2f} MB)")
+        prompt_with_optional_finder(out_file)

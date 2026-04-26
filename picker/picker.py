@@ -1,61 +1,38 @@
-# picker/picker.py
-from rich.console import Console
-from ..utils.durations import seconds_to_hms
+from __future__ import annotations
 
-console = Console()
+from typing import List
+from ..models.title import Title
+from ..models.movie import Movie
 
 
-def pick_titles(titles, tui=None):
-    """
-    Simple text-based picker using TUI popups for input.
-    Actions:
-      y = keep
-      n = skip
-      r = rename
-      enter = keep (default)
-    """
+def pick_titles(titles: List[Title], movie: Movie, args):
+    print("\nAvailable Titles:")
 
-    console.print("\n[bold cyan]Title Selection[/bold cyan]")
-    console.print(
-        "For each title: [green]y[/green]=keep  "
-        "[red]n[/red]=skip  "
-        "[cyan]r[/cyan]=rename  "
-        "[dim](enter=keep)[/dim]\n"
-    )
+    if titles:
+        longest = max(titles, key=lambda t: t.duration)
+        longest.is_main = True
 
     for t in titles:
-        # Show basic info
-        console.print(
-            f"\n[bold]{t.name} - {t.id}[/bold]: {t.mpls or '—'}  "
-            f"[dim]{seconds_to_hms(t.duration)}, {t.chapters} chapters[/dim]"
-        )
+        if not t.is_main:
+            t.is_bonus = True
 
-        # Ask user (via popup if TUI is active)
-        if tui:
-            choice = tui.popup_input("Keep this title? [y/n/r]").strip().lower()
-        else:
-            choice = console.input("Keep this title? [y/n/r]: ").strip().lower()
+    for t in titles:
+        label = "MAIN" if t.is_main else "BONUS"
+        mins = t.duration // 60
+        print(f"{t.id}: {t.name} ({mins} min) [{label}]")
 
-        # Skip
-        if choice == "n":
-            t.action = "skip"
-            continue
+    print("\nEnter title IDs to rip (comma-separated), or 'all':")
+    choice = input("> ").strip()
 
-        # Rename
-        if choice == "r":
-            if tui:
-                new_name = tui.popup_input("Enter new name: ").strip()
-            else:
-                new_name = console.input("Enter new name: ").strip()
+    if choice.lower() == "all":
+        selected = titles
+    else:
+        ids = {int(x.strip()) for x in choice.split(",") if x.strip()}
+        selected = [t for t in titles if t.id in ids]
 
-            if new_name:
-                t.new_name = new_name
-                t.action = "rename"
-            else:
-                t.action = "keep"
-            continue
+    for t in selected:
+        t.action = "rip"
+        t.movie_title = movie.title
+        t.movie_year = movie.year
 
-        # Default: keep
-        t.action = "keep"
-
-    return titles
+    return selected

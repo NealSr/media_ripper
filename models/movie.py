@@ -17,10 +17,12 @@ class Movie:
     This object is the single source of truth for movie-level metadata.
     """
 
+    disc_label: str
     title: str
-    year: int | None = None
+    year: int | str | None = None
 
     # TMDB metadata (optional)
+    tmdb_id: int | None = None
     runtime: int | None = None
     genres: list[str] = field(default_factory=list)
     score: float | None = None
@@ -71,3 +73,16 @@ class Movie:
 
     def __str__(self):
         return self.full_title
+
+    # ------------------------------------------------------------------
+    # Factory helpers
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_disc_label(cls, disc_label: str | None) -> Movie:
+        """
+        Fallback when TMDB is unavailable or no match is found.
+        Uses disc label as the title and leaves metadata empty.
+        """
+        title = disc_label or "NULL_DISC_LABEL"
+        return cls(title=title, year=None)
