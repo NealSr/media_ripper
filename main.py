@@ -23,3 +23,6 @@ def main():
     encode_titles(selected, movie, args)
 
     print("\n=== Done ===")
+
+if __name__ == "__main__":
+    main()
